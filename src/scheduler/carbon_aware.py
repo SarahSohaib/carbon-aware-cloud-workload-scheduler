@@ -1,57 +1,50 @@
+import sys, os
 import pandas as pd
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
+from src.config import COST_PER_UNIT
 from src.scheduler.scoring import compute_score
 
+MAX_DEFER_HOURS = 6
 
-def carbon_aware_schedule(job_row, data_df, w_carbon, w_cost, w_delay):
-    current_time = job_row["timestamp"]
-    deadline = current_time + pd.Timedelta(hours=24)
 
-    candidates = data_df[
-        (data_df["timestamp"] >= current_time) &
-        (data_df["timestamp"] <= deadline)
-    ].copy()
+def carbon_aware_schedule(job, carbon_index, weights):
+    submit   = job["submit_time"]
+    deadline = submit + pd.Timedelta(hours=MAX_DEFER_HOURS)
 
-    if candidates.empty:
-        return {
-            "scheduled_time": current_time,
-            "carbon_intensity": job_row["carbon_intensity"],
-            "workload": job_row["workload"],
-            "delay_hours": 0
-        }
+    window = carbon_index.loc[
+        (carbon_index.index >= submit) &
+        (carbon_index.index <= deadline)
+    ]
 
-    candidates["delay_hours"] = (
-        (candidates["timestamp"] - current_time).dt.total_seconds() / 3600
-    )
+    if window.empty:
+        window = carbon_index.iloc[[-1]]
 
-    # normalize carbon
-    min_c = candidates["carbon_intensity"].min()
-    max_c = candidates["carbon_intensity"].max()
+    c_min, c_max = window["carbon_intensity"].min(), window["carbon_intensity"].max()
+    c_range      = c_max - c_min + 1e-8
 
-    candidates["carbon_norm"] = (
-        (candidates["carbon_intensity"] - min_c) / (max_c - min_c + 1e-8)
-    )
+    best_score = float("inf")
+    best_row   = None
+    best_delay = 0.0
 
-    candidates["cost"] = 0.5
+    for ts, row in window.iterrows():
+        delay       = (ts - submit).total_seconds() / 3600
+        carbon_norm = (row["carbon_intensity"] - c_min) / c_range
+        delay_norm  = (delay / MAX_DEFER_HOURS) ** 2
 
-    candidates["score"] = candidates.apply(
-        lambda row: compute_score(
-            row["carbon_norm"],
-            row["cost"],
-            row["delay_hours"],
-            {
-                "carbon": w_carbon,
-                "cost": w_cost,
-                "delay": w_delay
-            }
-        ),
-        axis=1
-    )
+        score = compute_score(carbon_norm, 0.0, delay_norm, weights)
 
-    best = candidates.loc[candidates["score"].idxmin()]
+        if score < best_score:
+            best_score = score
+            best_row   = row
+            best_delay = delay
+            best_ts    = ts
 
     return {
-        "scheduled_time": best["timestamp"],
-        "carbon_intensity": best["carbon_intensity"],
-        "workload": job_row["workload"],
-        "delay_hours": best["delay_hours"]
+        "job_index":        job["job_id"],
+        "scheduled_time":   best_ts,
+        "carbon_intensity": best_row["carbon_intensity"],
+        "workload":         job["workload"],
+        "cost":             job["workload"] * COST_PER_UNIT,
+        "delay_hours":      round(best_delay, 2),
+        "policy":           "carbon_aware",
     }

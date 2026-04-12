@@ -1,97 +1,133 @@
 import pandas as pd
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
+
+from src.scheduler.scoring import compute_score
+
+WINDOW_HOURS = 6
 
 
 # ─────────────────────────────────────────────
-# SIMPLE NORMALIZATION
+# CARBON PREDICTION (HOURLY + FALLBACK)
 # ─────────────────────────────────────────────
-def normalize(series):
-    if series.max() == series.min():
-        return series * 0
-    return (series - series.min()) / (series.max() - series.min())
+def _predict_carbon(df: pd.DataFrame, window: pd.DataFrame) -> pd.Series:
+    try:
+        base = df.copy()
+        base["hour"] = pd.to_datetime(base["timestamp"]).dt.hour
+        hourly_avg = base.groupby("hour")["carbon_intensity"].mean()
+
+        predicted = window.index.hour.map(hourly_avg)
+
+        if predicted.isna().all():
+            raise ValueError("hourly prediction failed")
+
+        return predicted.fillna(base["carbon_intensity"].mean())
+
+    except Exception:
+        return (
+            df.set_index("timestamp")["carbon_intensity"]
+            .rolling(6, min_periods=1)
+            .mean()
+            .shift(1)
+            .reindex(window.index)
+            .bfill()
+            .fillna(df["carbon_intensity"].mean())
+        )
 
 
 # ─────────────────────────────────────────────
-# MAIN: GENERATE CANDIDATES
+# BUILD INDEX
 # ─────────────────────────────────────────────
-def get_candidates(df, selected_time, window_hours=24):
+def build_carbon_index(df):
+    return (
+        df[["timestamp", "carbon_intensity", "workload"]]
+        .copy()
+        .assign(timestamp=lambda x: pd.to_datetime(x["timestamp"]))
+        .set_index("timestamp")
+        .sort_index()
+    )
 
-    # future window
-    candidates = df[
-        (df["timestamp"] >= selected_time) &
-        (df["timestamp"] <= selected_time + pd.Timedelta(hours=window_hours))
+
+# ─────────────────────────────────────────────
+# GENERATE CANDIDATES
+# ─────────────────────────────────────────────
+def get_candidates(df, selected_time, weights):
+    carbon_index = build_carbon_index(df)
+    deadline = selected_time + pd.Timedelta(hours=WINDOW_HOURS)
+
+    window = carbon_index.loc[
+        (carbon_index.index >= selected_time) &
+        (carbon_index.index <= deadline)
     ].copy()
 
-    if candidates.empty:
-        return candidates
+    if window.empty:
+        return pd.DataFrame()
+
+    # prediction
+    window["predicted_carbon"] = _predict_carbon(df, window)
+
+    # estimated emissions
+    avg_workload = df["workload"].mean()
+    window["estimated_carbon_kg"] = (
+        window["predicted_carbon"] * avg_workload / 1000
+    )
 
     # delay
-    candidates["delay_hours"] = (
-        candidates["timestamp"] - selected_time
-    ).dt.total_seconds() / 3600
-
-    # prediction (rolling mean fallback)
-    candidates["predicted_carbon"] = (
-        df["carbon_intensity"]
-        .rolling(24, min_periods=1)
-        .mean()
-        .shift(1)
-        .reindex(candidates.index)
-        .fillna(method="bfill")
+    window["delay_hours"] = (
+        (window.index - selected_time).total_seconds() / 3600
     )
 
-    # assume avg workload
-    avg_workload = df["workload"].mean()
+    # normalization (SAFE)
+    c_min = window["predicted_carbon"].min()
+    c_max = window["predicted_carbon"].max()
+    c_range = (c_max - c_min) if (c_max - c_min) != 0 else 1
 
-    candidates["estimated_carbon_kg"] = (
-        candidates["predicted_carbon"] * avg_workload / 1000
-    )
+    d_max = window["delay_hours"].max()
+    d_max = d_max if d_max != 0 else 1
 
-    # ─────────────────────────────────────────
-    # SIMPLE SCORING (NO compute_score call)
-    # ─────────────────────────────────────────
-    carbon_norm = normalize(candidates["predicted_carbon"])
-    delay_norm  = normalize(candidates["delay_hours"])
+    carbon_norm = (window["predicted_carbon"] - c_min) / c_range
+    delay_norm = (window["delay_hours"] / d_max) ** 2
 
-    # weights (same as your defaults)
-    w_carbon = 0.8
-    w_delay  = 0.15
-    w_cost   = 0.05
+    # scoring
+    window["score"] = [
+        compute_score(c, 0.0, d, weights)
+        for c, d in zip(carbon_norm, delay_norm)
+    ]
 
-    candidates["score"] = (
-        w_carbon * carbon_norm +
-        w_delay  * delay_norm +
-        w_cost   * 0   # no cost yet
-    )
+    window = window.reset_index()
 
-    return candidates.sort_values("score")
+    return window.sort_values("score").reset_index(drop=True)
 
 
 # ─────────────────────────────────────────────
 # INSIGHT GENERATION
 # ─────────────────────────────────────────────
-def build_insight(candidates):
+def build_insight(candidates, weights):
+    if candidates.empty:
+        return {}
 
     best = candidates.iloc[0]
-    now  = candidates[candidates["delay_hours"] == 0]
 
-    if not now.empty:
-        now = now.iloc[0]
-    else:
-        now = best
+    # find "run now" row properly
+    now_rows = candidates[candidates["delay_hours"].abs() < 1e-6]
+    now = now_rows.iloc[0] if not now_rows.empty else candidates.iloc[0]
 
-    carbon_saved = now["estimated_carbon_kg"] - best["estimated_carbon_kg"]
+    carbon_now  = now["estimated_carbon_kg"]
+    carbon_best = best["estimated_carbon_kg"]
 
-    pct = (carbon_saved / now["estimated_carbon_kg"] * 100) if now["estimated_carbon_kg"] else 0
+    saved = carbon_now - carbon_best
+    saved_pct = (saved / carbon_now * 100) if carbon_now else 0
 
     return {
-        "best_time": best["timestamp"],
-        "best_delay_hrs": round(best["delay_hours"], 2),
-        "best_carbon_kg": round(best["estimated_carbon_kg"], 2),
-        "now_carbon_kg": round(now["estimated_carbon_kg"], 2),
-        "carbon_saved_pct": round(pct, 2),
+        "best_time":        best["timestamp"],
+        "best_delay_hrs":   round(best["delay_hours"], 2),
+        "best_carbon_kg":   round(carbon_best, 4),
+        "now_carbon_kg":    round(carbon_now, 4),
+        "carbon_saved_pct": round(saved_pct, 2),
         "recommendation": (
-            f"Delay by {round(best['delay_hours'],1)} hrs to save {round(pct,1)}% carbon"
-            if pct > 0 else
-            "Run now is already optimal"
-        )
+            f"Delay by {round(best['delay_hours'], 1)} hrs to reduce emissions by "
+            f"{round(saved_pct, 1)}% ({round(saved, 4)} kg CO₂)"
+            if best["delay_hours"] > 0 and saved > 0
+            else "Running immediately is already optimal."
+        ),
     }
