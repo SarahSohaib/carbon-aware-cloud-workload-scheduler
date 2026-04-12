@@ -1,133 +1,126 @@
-# Carbon-Aware Cloud Workload Scheduler
-## Using Machine Learning for Sustainable Cloud Optimization
+## Carbon-Aware Cloud Workload Scheduler
+
+A simulation-based system that optimizes cloud workload execution by shifting tasks to time periods with lower carbon intensity, while balancing delay and cost constraints.
 
 ---
 
-## Overview
+## Project Overview
 
-Cloud computing has become the backbone of modern digital infrastructure, enabling scalable and high-performance applications through distributed data centers. However, the rapid growth of cloud workloads has also increased energy consumption and carbon emissions.
-
-Traditional cloud workload scheduling mechanisms primarily optimize for performance and operational cost, while environmental impact is rarely considered. Since the carbon intensity of electricity varies across geographic regions and time depending on energy generation sources, workloads executed without environmental awareness can lead to unnecessary carbon emissions.
-
-This project proposes a **Carbon-Aware Cloud Workload Scheduler**, a machine learning driven framework that predicts future workload demand and generates scheduling recommendations based on carbon intensity, cost considerations, and performance requirements. The objective is to demonstrate how intelligent scheduling decisions can reduce environmental impact while maintaining operational efficiency.
+This project implements a **carbon-aware scheduling engine** that evaluates when to execute workloads based on environmental impact. Instead of running jobs immediately, the system intelligently selects future time slots that minimize carbon emissions without introducing excessive delay.
 
 ---
 
-## Problem Statement
+## Phase 1 — Data Preparation ✅
 
-Existing cloud scheduling mechanisms:
+This phase focuses on generating a realistic dataset to simulate cloud workloads and carbon intensity patterns.
 
-- Optimize resource allocation based on performance and cost
-- Do not consider carbon intensity variations across regions and time
-- Execute workloads during high-emission periods even when cleaner alternatives exist
+### Dataset Features
 
-This results in avoidable carbon emissions and inefficient energy usage.
+* Hourly timestamps over a 90-day period
+* Simulated workload demand with daily and weekly trends
+* Carbon intensity variation (gCO₂/kWh)
+* Time-series structure suitable for scheduling decisions
 
-The project addresses this gap by integrating workload forecasting with carbon-aware decision making to support sustainable cloud operations.
+### Output
 
----
-
-## Objectives
-
-- Predict future cloud workload demand using machine learning models
-- Integrate carbon intensity data into scheduling decisions
-- Perform multi-objective optimization across performance, cost, and sustainability
-- Reduce estimated carbon footprint without compromising service quality
-- Demonstrate a practical framework for sustainable cloud scheduling
+```
+data/carbon_aware_workload_dataset.csv
+```
 
 ---
 
-## System Architecture
+## Core System (Final Implementation)
 
-The system follows a data-driven pipeline:
+The project is built around three main components:
 
-1. **Data Collection**
-   - Historical workload data
-   - Carbon intensity data
+### 1. Scheduler Engine
 
-2. **Data Preparation**
-   - Timestamp alignment
-   - Missing value handling
-   - Outlier detection
-   - Time-series feature preparation
+* Naive Scheduler: Executes jobs immediately
+* Carbon-Aware Scheduler: Selects optimal execution time within a 24-hour window
+* Multi-objective scoring based on:
 
-3. **Workload Forecasting**
-   - Time-series prediction using Prophet or LSTM models
-   - Multi-horizon workload prediction
+  * Carbon intensity
+  * Execution delay
+  * Cost (simplified)
 
-4. **Carbon-Aware Scheduling Engine**
-   - Combines workload prediction, carbon intensity, and cost metrics
-   - Generates optimized scheduling recommendations
+### 2. Simulation Engine
 
-5. **Backend API**
-   - FastAPI or Flask-based service
-   - REST endpoints for scheduling recommendations
+* Runs both naive and smart scheduling strategies
+* Computes:
 
-6. **Visualization Dashboard**
-   - Streamlit interface
-   - Displays forecasts, carbon trends, and scheduling outputs
+  * Total carbon emissions
+  * Carbon savings (kg)
+  * Percentage reduction
+  * Average delay per job
 
----
+### 3. Interactive Dashboard
 
-## Key Features
+* Built using Streamlit
+* Real-time tuning using sliders:
 
-- Predictive workload scheduling instead of reactive allocation
-- Integration of environmental sustainability metrics
-- Multi-objective optimization framework
-- Modular architecture suitable for cloud integration
-- Decision-support system without modifying existing applications
+  * Carbon weight
+  * Delay weight
+  * Cost weight
+* Visualizations:
 
----
-
-## Machine Learning Approach
-
-The project uses time-series forecasting models:
-
-### Prophet
-- Captures seasonal workload patterns
-- Handles trend changes effectively
-
-### LSTM Networks
-- Captures complex temporal dependencies
-- Suitable for non-linear workload behavior
-
-Prediction quality is evaluated using **Mean Absolute Percentage Error (MAPE)** to ensure reliable scheduling decisions.
+  * Total carbon comparison
+  * Carbon intensity over time
+  * Per-job carbon comparison
+  * Delay distribution
 
 ---
 
-## Expected Outcomes
+## Key Results
 
-- Improved energy efficiency compared to traditional scheduling
-- Reduced carbon emissions through intelligent execution timing
-- Demonstration of sustainability-aware cloud optimization
-- Deployable prototype integrating ML prediction and scheduling logic
-
----
-
-## Future Scope
-
-- Integration with real-time carbon intensity APIs
-- Reinforcement learning-based adaptive scheduling
-- Multi-cloud optimization across providers
-- Fully automated execution instead of recommendation-based scheduling
-- Enterprise-scale deployment and orchestration integration
+* Achieves measurable carbon reduction (~10–20%) under realistic constraints
+* Maintains low average delay per job
+* Demonstrates trade-offs between sustainability and performance
 
 ---
 
-## Technologies Used
+## How It Works
 
-- Python
-- Prophet / LSTM (TensorFlow or PyTorch)
-- FastAPI / Flask
-- Streamlit
-- Cloud Platforms (AWS EC2 or equivalent)
-- Time-series data processing libraries
+For each job:
+
+1. Identify candidate execution times within the next 24 hours
+2. Compute a score for each candidate:
+
+   ```
+   score = w_carbon * carbon + w_delay * delay + w_cost * cost
+   ```
+3. Select the time with the minimum score
+4. Compare against naive scheduling
 
 ---
 
-## Author
+## Tech Stack
 
-**Sarah Sohaib**  
-B.Tech Computer Science and Engineering  
-Cloud Specialization Track  
-Registration No: 23FE10CSE00673
+* Python
+* Pandas
+* Streamlit
+* Plotly / Matplotlib
+
+---
+
+## How to Run
+
+```bash
+pip install -r requirements.txt
+streamlit run src/dashboard/app.py
+```
+
+---
+
+## Future Improvements
+
+* Integration with real-world carbon intensity APIs (Electricity Maps, WattTime)
+* Job-specific deadlines and SLA constraints
+* Multi-region scheduling
+* Dynamic cost modeling
+* Advanced optimization techniques
+
+---
+
+## Conclusion
+
+This project demonstrates how intelligent scheduling can reduce carbon emissions in cloud systems by leveraging time-based optimization. It highlights the importance of balancing environmental impact with system performance in modern cloud computing.

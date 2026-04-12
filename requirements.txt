@@ -1,3 +1,5 @@
-numpy
 pandas
+numpy
 matplotlib
+streamlit
+plotly
