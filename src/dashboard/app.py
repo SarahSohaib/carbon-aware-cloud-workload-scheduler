@@ -9,11 +9,31 @@ from src.simulation.runner import load_data, run_simulation
 st.set_page_config(page_title="Carbon-Aware Scheduler", layout="wide")
 st.title("Carbon-Aware Cloud Workload Scheduler")
 
-w_carbon = st.sidebar.slider("Carbon Weight", 0.0, 1.0, 0.6)
-w_delay = st.sidebar.slider("Delay Weight", 0.0, 1.0, 0.2)
-w_cost = st.sidebar.slider("Cost Weight", 0.0, 1.0, 0.2)
+# Default values
+default_carbon = 0.8
+default_delay  = 0.15
+default_cost   = 0.05
 
-@st.cache_data
+# Initialize session state
+if "carbon" not in st.session_state:
+    st.session_state["carbon"] = default_carbon
+if "delay" not in st.session_state:
+    st.session_state["delay"] = default_delay
+if "cost" not in st.session_state:
+    st.session_state["cost"] = default_cost
+
+# Sliders
+w_carbon = st.sidebar.slider("Carbon Weight", 0.0, 1.0, st.session_state["carbon"])
+w_delay  = st.sidebar.slider("Delay Weight", 0.0, 1.0, st.session_state["delay"])
+w_cost   = st.sidebar.slider("Cost Weight", 0.0, 1.0, st.session_state["cost"])
+
+# Reset button
+if st.sidebar.button("Reset to Recommended"):
+    st.session_state["carbon"] = default_carbon
+    st.session_state["delay"] = default_delay
+    st.session_state["cost"] = default_cost
+    st.rerun()
+
 @st.cache_data
 def get_results(w_carbon, w_cost, w_delay):
     df = load_data()
